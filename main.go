@@ -58,8 +58,6 @@ type Fee struct {
 	price2  float64
 	price3  float64
 
-	isAll bool
-
 	rows          [][]string
 	modeRows      map[string][]Rule
 	hideColNumber int // 隐藏的行
@@ -220,13 +218,13 @@ func (l *Fee) step1() error {
 		value := ""
 		texture := v[l.textureColNameIndex-1]
 		if strings.Contains(texture, "不锈钢") {
-			value = fmt.Sprintf("=%v*%v%v*%v%v", price1, l.weightColName, strconv.FormatInt(int64(i+1), 10), l.numColName, strconv.FormatInt(int64(i+1), 10))
+			value = fmt.Sprintf("=%v*%v%v*%v%v", *price1, l.weightColName, strconv.FormatInt(int64(i+1), 10), l.numColName, strconv.FormatInt(int64(i+1), 10))
 		} else if strings.Contains(texture, "铝") {
-			value = fmt.Sprintf("=%v*%v%v*%v%v", price2, l.weightColName, strconv.FormatInt(int64(i+1), 10), l.numColName, strconv.FormatInt(int64(i+1), 10))
+			value = fmt.Sprintf("=%v*%v%v*%v%v", *price2, l.weightColName, strconv.FormatInt(int64(i+1), 10), l.numColName, strconv.FormatInt(int64(i+1), 10))
 		} else {
-			value = fmt.Sprintf("=%v*%v%v*%v%v", price3, l.weightColName, strconv.FormatInt(int64(i+1), 10), l.numColName, strconv.FormatInt(int64(i+1), 10))
+			value = fmt.Sprintf("=%v*%v%v*%v%v", *price3, l.weightColName, strconv.FormatInt(int64(i+1), 10), l.numColName, strconv.FormatInt(int64(i+1), 10))
 		}
-		err := l.f.SetCellFormula(DataSheetName, fmt.Sprintf("%v%v", l.fee1ColName, strconv.FormatInt(int64(i+1), 10)), value)
+		err := l.f.SetCellFormula(DataSheetName, fmt.Sprintf("%v%v", l.fee1ColName, int64(i+1)), value)
 		if err != nil {
 			return err
 		}
@@ -237,7 +235,7 @@ func (l *Fee) step1() error {
 func (l *Fee) rule(rowRule string, workStage, row int) string {
 	rowRule = strings.ReplaceAll(rowRule, "重量", fmt.Sprintf("%v%v", l.weightColName, row))
 	rowRule = strings.ReplaceAll(rowRule, "数量", fmt.Sprintf("%v%v", l.numColName, row))
-	rowRule = strings.ReplaceAll(rowRule, "钢材费用", fmt.Sprintf("%v%v", l.fee1ColName, row))
+	rowRule = strings.ReplaceAll(rowRule, "钢材成本", fmt.Sprintf("%v%v", l.fee1ColName, row))
 
 	temp, _ := excelize.ColumnNumberToName(l.fee2ColNameIndex + workStage*(l.hideColNumber+3) + 1)
 	rowRule = strings.ReplaceAll(rowRule, "工时", fmt.Sprintf("%v%v", temp, row))
@@ -250,7 +248,10 @@ func (l *Fee) step2() error {
 	l.fee2ColNumber = 0
 
 	// 统计数据
-	for _, v := range l.rows {
+	for i, v := range l.rows {
+		if i <= TitleRowsNumber {
+			continue
+		}
 		workStageStr := v[l.workStageColNameIndex-1]
 		if len(strings.Split(workStageStr, ",")) > l.fee2ColNumber {
 			l.fee2ColNumber = len(strings.Split(workStageStr, ","))
@@ -294,6 +295,7 @@ func (l *Fee) step2() error {
 	}
 
 	// 数据
+	allMap := make(map[string]string)
 	for j, v := range l.rows {
 		if j < TitleRowsNumber {
 			continue
@@ -304,6 +306,8 @@ func (l *Fee) step2() error {
 			if value == "" {
 				continue
 			}
+			value = strings.Trim(value, " ")
+
 			temp, _ := excelize.ColumnNumberToName(l.fee2ColNameIndex + i*(l.hideColNumber+3))
 			err := l.f.SetCellValue(DataSheetName, fmt.Sprintf("%v%v", temp, j+1), value)
 			if err != nil {
@@ -325,9 +329,8 @@ func (l *Fee) step2() error {
 				endPoint, _ := excelize.ColumnNumberToName(l.fee2ColNameIndex + i*(l.hideColNumber+3) + 3 + l.hideColNumber - 1)
 				err = l.f.SetCellFormula(DataSheetName, fmt.Sprintf("%v%v", temp, j+1), fmt.Sprintf("=SUM(%v%v:%v%v)", startPoint, j+1, endPoint, j+1))
 			} else {
-				if !l.isAll {
-					fmt.Println("存在不匹配的工序规则")
-					l.isAll = true
+				if _, ok := allMap[value]; !ok {
+					allMap[value] = value
 				}
 			}
 		}
@@ -339,7 +342,13 @@ func (l *Fee) step2() error {
 			}
 		}
 	}
-
+	if len(allMap) > 0 {
+		fmt.Printf("存在不匹配的工序-[")
+		for _, a := range allMap {
+			fmt.Printf("%v ", a)
+		}
+		fmt.Println("]")
+	}
 	return nil
 }
 
@@ -355,7 +364,6 @@ func (l *Fee) step3() error {
 		if i <= TitleRowsNumber {
 			continue
 		}
-
 		value := make([]string, 0)
 		for j := 0; j < l.fee2ColNumber; j++ {
 			cTemp, _ := excelize.ColumnNumberToName(l.fee2ColNameIndex + (l.hideColNumber+3)*j + 2)
